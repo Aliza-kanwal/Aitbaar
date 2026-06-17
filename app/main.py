@@ -1,19 +1,28 @@
 from fastapi import FastAPI, UploadFile, File, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from backend.app.ocr import extract_invoice_data
+from app.ocr import extract_invoice_data
 from app.score import calculate_trust_score
-from backend.app.whatsapp_parser import parse_whatsapp_chat, whatsapp_to_wallet_score_boost
+from app.whatsapp_parser import parse_whatsapp_chat, whatsapp_to_wallet_score_boost
 import firebase_admin
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
-import shutil, os, uuid
+import shutil, os, uuid, json
 from datetime import datetime
 from typing import Optional
 
 load_dotenv()
 
-# Firebase init
-cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS"))
+# ─── Firebase init — works both locally (file path) and on Railway (JSON env var) ───
+firebase_json_env = os.getenv("FIREBASE_CREDENTIALS_JSON")
+
+if firebase_json_env:
+    # Railway / production: credentials passed as a JSON string env variable
+    cred_dict = json.loads(firebase_json_env)
+    cred = credentials.Certificate(cred_dict)
+else:
+    # Local dev: credentials loaded from a file path
+    cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS"))
+
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -97,7 +106,7 @@ async def upload_invoice(file: UploadFile = File(...), shop_id: str = "shop_001"
     return {"invoice": invoice_data, "trust_score": score_data}
 
 
-# ─── WhatsApp Order History Upload (NEW — bonus feature) ───────
+# ─── WhatsApp Order History Upload ─────────────────────────────
 @app.post("/upload-whatsapp")
 async def upload_whatsapp(file: UploadFile = File(...), shop_id: str = "shop_001"):
     """Upload a WhatsApp chat export (.txt) to extract order history and boost wallet score"""
@@ -129,7 +138,7 @@ def get_score(shop_id: str):
     return {"error": "Score nahi mila — pehle invoice upload karo"}
 
 
-# ─── Get All Invoices for a Shop (NEW) ─────────────────────────
+# ─── Get All Invoices for a Shop ───────────────────────────────
 @app.get("/invoices/{shop_id}")
 def get_invoices(shop_id: str):
     docs = db.collection("invoices").where("shop_id", "==", shop_id).stream()
