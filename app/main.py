@@ -1,8 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.ocr import extract_invoice_data
+from backend.app.ocr import extract_invoice_data
 from app.score import calculate_trust_score
-from app.whatsapp_parser import parse_whatsapp_chat, whatsapp_to_wallet_score_boost
+from backend.app.whatsapp_parser import parse_whatsapp_chat, whatsapp_to_wallet_score_boost
 import firebase_admin
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
@@ -13,13 +13,7 @@ from typing import Optional
 load_dotenv()
 
 # Firebase init
-import json
-firebase_creds = os.getenv("FIREBASE_CREDENTIALS")
-if firebase_creds:
-    cred_dict = json.loads(firebase_creds)
-    cred = credentials.Certificate(cred_dict)
-else:
-    raise ValueError("FIREBASE_CREDENTIALS environment variable not set")
+cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS"))
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
