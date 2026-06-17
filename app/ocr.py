@@ -27,10 +27,64 @@ def extract_invoice_data(image_path: str):
         if date_pattern:
             date = date_pattern.group(1)
 
-        # Total Amount — last number greater than 100
-        all_numbers = re.findall(r'\b\d+(?:\.\d{1,2})?\b', full_text)
-        amounts = [n for n in all_numbers if int(float(n)) > 100]
-        total_amount = amounts[-1] if amounts else all_numbers[-1] if all_numbers else None
+        # Total Amount — smart detection
+        # Step 1: handle comma-separated numbers properly (e.g. 56,550 -> 56550)
+        comma_number_pattern = r'\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b'
+        plain_number_pattern = r'\b\d+(?:\.\d{1,2})?\b'
+
+        def clean_number(n):
+            return n.replace(',', '')
+
+        # Step 2: prioritize lines with "total" keyword (but not "sub-total")
+        total_amount = None
+        priority_keywords = ['grand total', 'total due', 'amount due', 'total:', 'total ']
+
+        for line in lines:
+            line_lower = line.lower()
+            if 'sub-total' in line_lower or 'subtotal' in line_lower or 'sub total' in line_lower:
+                continue
+            if any(kw in line_lower for kw in priority_keywords):
+                comma_matches = re.findall(comma_number_pattern, line)
+                if comma_matches:
+                    total_amount = clean_number(comma_matches[-1])
+                    break
+                plain_matches = re.findall(plain_number_pattern, line)
+                plain_matches = [m for m in plain_matches if int(float(m)) > 50]
+                if plain_matches:
+                    total_amount = plain_matches[-1]
+                    break
+
+        # Step 3: fallback — largest comma-formatted number in whole text
+        if not total_amount:
+            comma_matches = re.findall(comma_number_pattern, full_text)
+            if comma_matches:
+                cleaned = [clean_number(m) for m in comma_matches]
+                total_amount = str(max(cleaned, key=lambda x: float(x)))
+
+        # Step 4: final fallback — largest plain number over 100
+        if not total_amount:
+            all_numbers = re.findall(plain_number_pattern, full_text)
+            amounts = [n for n in all_numbers if int(float(n)) > 100]
+            total_amount = max(amounts, key=lambda x: float(x)) if amounts else (all_numbers[-1] if all_numbers else None)
+
+        # Distributor — check for known brand/company keywords
+        known_distributors = [
+            "unilever", "nestle", "nestlé", "colgate", "p&g", "procter",
+            "national foods", "shan", "engro", "tapal", "lipton",
+            "candyland", "mondelez", "haleeb", "olpers"
+        ]
+        distributor = None
+        text_lower = full_text.lower()
+        for name in known_distributors:
+            if name in text_lower:
+                distributor = name.title()
+                break
+        if not distributor:
+            # fallback: look for "To:" or company-style line near top
+            for line in lines[:6]:
+                if re.search(r'(warehouse|distributors?|trading|enterprises|& co)', line, re.IGNORECASE):
+                    distributor = line.strip()
+                    break
 
         # Items list
         items = []
@@ -48,6 +102,7 @@ def extract_invoice_data(image_path: str):
             "invoice_no": invoice_no,
             "date": date,
             "total_amount": total_amount,
+            "distributor": distributor,
             "items": items,
             "raw_lines": lines
         }
