@@ -13,7 +13,13 @@ from typing import Optional
 load_dotenv()
 
 # Firebase init
-cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS"))
+import json
+firebase_creds = os.getenv("FIREBASE_CREDENTIALS")
+if firebase_creds:
+    cred_dict = json.loads(firebase_creds)
+    cred = credentials.Certificate(cred_dict)
+else:
+    raise ValueError("FIREBASE_CREDENTIALS environment variable not set")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
