@@ -1,6 +1,6 @@
 from datetime import datetime
 
-def calculate_trust_score(invoices: list) -> dict:
+def calculate_trust_score(invoices: list, whatsapp_boost: int = 0) -> dict:
     if not invoices:
         return {"total_score": 0, "breakdown": {}}
 
@@ -67,7 +67,7 @@ def calculate_trust_score(invoices: list) -> dict:
     else:
         growth_score = 5
 
-    # 4. WALLET SCORE (20%)
+    # 4. WALLET SCORE (20%) — mock wallet activity + WhatsApp order boost
     wallet = invoices[-1].get("wallet_data", {})
     txn_count = wallet.get("total_transactions", 0)
 
@@ -79,6 +79,9 @@ def calculate_trust_score(invoices: list) -> dict:
         wallet_score = 10
     else:
         wallet_score = 5
+
+    # Add WhatsApp order-history boost (capped so wallet_score never exceeds 20)
+    wallet_score = min(wallet_score + whatsapp_boost, 20)
 
     total_score = frequency_score + consistency_score + growth_score + wallet_score
 

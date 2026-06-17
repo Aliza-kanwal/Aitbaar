@@ -47,6 +47,12 @@ def process_single_invoice(file_path: str, original_filename: str, shop_id: str)
         invoice_data["filename"] = original_filename
         return invoice_data
 
+    # Auto-assign sequential invoice number per shop (1, 2, 3...)
+    existing = db.collection("invoices").where("shop_id", "==", shop_id).stream()
+    existing_count = sum(1 for _ in existing)
+    invoice_data["ocr_invoice_no"] = invoice_data.get("invoice_no")  # keep raw OCR value
+    invoice_data["invoice_no"] = str(existing_count + 1)
+
     invoice_data["filename"] = original_filename
     invoice_data["shop_id"] = shop_id
     invoice_data["uploaded_at"] = datetime.now().isoformat()
@@ -57,7 +63,14 @@ def process_single_invoice(file_path: str, original_filename: str, shop_id: str)
 def recalculate_score(shop_id: str):
     invoices = db.collection("invoices").where("shop_id", "==", shop_id).stream()
     invoice_list = [doc.to_dict() for doc in invoices]
-    score_data = calculate_trust_score(invoice_list)
+
+    # Pull WhatsApp score boost (if any WhatsApp data was uploaded for this shop)
+    whatsapp_boost = 0
+    wa_doc = db.collection("whatsapp_data").document(shop_id).get()
+    if wa_doc.exists:
+        whatsapp_boost = wa_doc.to_dict().get("score_boost", 0)
+
+    score_data = calculate_trust_score(invoice_list, whatsapp_boost)
 
     db.collection("scores").document(shop_id).set({
         **score_data,
@@ -101,7 +114,10 @@ async def upload_whatsapp(file: UploadFile = File(...), shop_id: str = "shop_001
         "uploaded_at": datetime.now().isoformat()
     })
 
-    return {"parsed_data": parsed, "wallet_score_boost": boost}
+    # Recalculate score immediately so the boost takes effect right away
+    score_data = recalculate_score(shop_id)
+
+    return {"parsed_data": parsed, "wallet_score_boost": boost, "trust_score": score_data}
 
 
 # ─── Get Score ────────────────────────────────────────────────
@@ -111,6 +127,26 @@ def get_score(shop_id: str):
     if doc.exists:
         return doc.to_dict()
     return {"error": "Score nahi mila — pehle invoice upload karo"}
+
+
+# ─── Get All Invoices for a Shop (NEW) ─────────────────────────
+@app.get("/invoices/{shop_id}")
+def get_invoices(shop_id: str):
+    docs = db.collection("invoices").where("shop_id", "==", shop_id).stream()
+    invoices = []
+    for doc in docs:
+        data = doc.to_dict()
+        invoices.append({
+            "invoice_no": data.get("invoice_no"),
+            "date": data.get("date"),
+            "total_amount": data.get("total_amount"),
+            "distributor": data.get("distributor"),
+            "filename": data.get("filename"),
+            "uploaded_at": data.get("uploaded_at"),
+            "items": data.get("items", [])
+        })
+    invoices.sort(key=lambda x: x.get("uploaded_at") or "", reverse=True)
+    return {"shop_id": shop_id, "total": len(invoices), "invoices": invoices}
 
 
 # ─── Loan Recommendation (70+ = auto approve) ──────────────────
